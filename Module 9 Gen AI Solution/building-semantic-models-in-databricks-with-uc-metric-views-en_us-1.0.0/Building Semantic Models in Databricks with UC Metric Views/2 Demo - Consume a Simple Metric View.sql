@@ -1,0 +1,324 @@
+-- Databricks notebook source
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Demo - Consume a Simple Metric View
+-- MAGIC
+-- MAGIC Now that we have created a metric view, let's see its capabilities for bringing a consistent view of business intelligence to data consumers.
+-- MAGIC
+-- MAGIC ### Estimated Duration: 10 minutes
+-- MAGIC
+-- MAGIC ### Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you should be able to:
+-- MAGIC - Query a metric view in SQL to evaluate the measures associated with it
+-- MAGIC - Create visualizations using the metric view using Drag & Drop 
+-- MAGIC - Use an ad-hoc Genie space to ask questions based on a metric view
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## REQUIRED - SELECT A SHARED SQL WAREHOUSE
+-- MAGIC
+-- MAGIC Before executing cells in this notebook, please select the **SHARED SQL WAREHOUSE** in the lab. Follow these steps:
+-- MAGIC
+-- MAGIC 1. Navigate to the top-right of this notebook and click the drop-down to select compute (it might say **Connect**). Complete one of the following below:
+-- MAGIC
+-- MAGIC    a. Under **Recent resources**, check to see if you have a **shared_warehouse SQL**. If you do, select it.
+-- MAGIC
+-- MAGIC    b. If you do not have a **shared_warehouse** under **Recent resources**, complete the following:
+-- MAGIC
+-- MAGIC     - In the same drop-down, select **More**.
+-- MAGIC
+-- MAGIC     - Then select the **SQL Warehouse** button.
+-- MAGIC
+-- MAGIC     - In the drop-down, make sure **shared_warehouse** is selected.
+-- MAGIC
+-- MAGIC     - Then, at the bottom of the pop-up, select **Start and attach**.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ##### YAML Checkpoint - ANSWER
+-- MAGIC
+-- MAGIC If you did not complete the previous notebooks, use the starter YAML metric view provided below.
+-- MAGIC
+-- MAGIC Complete the following steps:
+-- MAGIC
+-- MAGIC - Set your **LABUSER** catalog and **default** schema
+-- MAGIC - Create a metric view named **order_details**
+-- MAGIC - Paste the starter YAML into the editor
+-- MAGIC - Replace the **LABUSER** placeholder with your own catalog name in all table references
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC   <summary>EXPAND FOR SOLUTION CODE</summary>
+-- MAGIC <button onclick="copyBlock()">Copy to clipboard</button>
+-- MAGIC
+-- MAGIC <pre id="copy-block" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; border:1px solid #e5e7eb; border-radius:10px; background:#f8fafc; padding:14px 16px; font-size:0.85rem; line-height:1.35; white-space:pre;">
+-- MAGIC <code>
+-- MAGIC <!-------------------ADD SOLUTION CODE BELOW------------------->
+-- MAGIC version: 1.1
+-- MAGIC
+-- MAGIC source: samples.tpch.lineitem
+-- MAGIC
+-- MAGIC joins:
+-- MAGIC   - name: orders
+-- MAGIC     source: samples.tpch.orders
+-- MAGIC     "on": orders.o_orderkey = source.l_orderkey
+-- MAGIC     joins:
+-- MAGIC       - name: customers
+-- MAGIC         source: samples.tpch.customer
+-- MAGIC         "on": orders.o_custkey = customers.c_custkey
+-- MAGIC
+-- MAGIC filter: YEAR(orders.o_orderdate) > 1994
+-- MAGIC
+-- MAGIC dimensions:
+-- MAGIC   - name: order_ID
+-- MAGIC     expr: orders.o_orderkey
+-- MAGIC     display_name: Order ID
+-- MAGIC     synonyms:
+-- MAGIC     - order identifier
+-- MAGIC     - receipt number
+-- MAGIC   - name: order_date
+-- MAGIC     expr: orders.o_orderdate
+-- MAGIC     display_name: Order Date
+-- MAGIC     format:
+-- MAGIC       type: date
+-- MAGIC       date_format: year_month_day
+-- MAGIC       leading_zeros: false
+-- MAGIC   - name: shipping_mode
+-- MAGIC     expr: source.l_shipmode
+-- MAGIC     display_name: Shipping Mode
+-- MAGIC   - name: ship_date
+-- MAGIC     expr: source.l_shipdate
+-- MAGIC     display_name: Shipping Date
+-- MAGIC     format:
+-- MAGIC       type: date
+-- MAGIC       date_format: year_month_day
+-- MAGIC       leading_zeros: false
+-- MAGIC
+-- MAGIC measures:
+-- MAGIC   - name: total_item_count
+-- MAGIC     expr: COUNT(source.l_orderkey)
+-- MAGIC     display_name: Total Item Count
+-- MAGIC   - name: total_distinct_orders
+-- MAGIC     expr: COUNT(DISTINCT source.l_orderkey)
+-- MAGIC     display_name: Total Distinct Orders
+-- MAGIC <!-------------------END SOLUTION CODE------------------->
+-- MAGIC </code></pre>
+-- MAGIC
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC function copyBlock() {
+-- MAGIC   const el = document.getElementById("copy-block");
+-- MAGIC   if (!el) return;
+-- MAGIC
+-- MAGIC   const text = el.innerText;
+-- MAGIC
+-- MAGIC   // Preferred modern API
+-- MAGIC   if (navigator.clipboard && navigator.clipboard.writeText) {
+-- MAGIC     navigator.clipboard.writeText(text)
+-- MAGIC       .then(() => alert("Copied to clipboard"))
+-- MAGIC       .catch(err => {
+-- MAGIC         console.error("Clipboard write failed:", err);
+-- MAGIC         fallbackCopy(text);
+-- MAGIC       });
+-- MAGIC   } else {
+-- MAGIC     fallbackCopy(text);
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC
+-- MAGIC function fallbackCopy(text) {
+-- MAGIC   const textarea = document.createElement("textarea");
+-- MAGIC   textarea.value = text;
+-- MAGIC   textarea.style.position = "fixed";
+-- MAGIC   textarea.style.left = "-9999px";
+-- MAGIC   document.body.appendChild(textarea);
+-- MAGIC   textarea.select();
+-- MAGIC   try {
+-- MAGIC     document.execCommand("copy");
+-- MAGIC     alert("Copied to clipboard");
+-- MAGIC   } catch (err) {
+-- MAGIC     console.error("Fallback copy failed:", err);
+-- MAGIC     alert("Could not copy to clipboard. Please copy manually.");
+-- MAGIC   } finally {
+-- MAGIC     document.body.removeChild(textarea);
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC </script>
+-- MAGIC </details>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## A. Classroom Setup
+-- MAGIC
+-- MAGIC 1. Run the following cell to configure your working environment for this notebook.
+-- MAGIC
+-- MAGIC **NOTE:** The `DA` object is only used in Databricks Academy courses and is not available outside of these courses. It will dynamically reference the information needed to run the course in your environment.
+
+-- COMMAND ----------
+
+-- MAGIC %run ./Includes/2-Classroom-Setup
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC 2. Run the following cell to view your default catalog and schema. Confirm that your default schema is `labuser` followed by a sequence of digits, such as **labuser11089101_1757916624** and your catalog is **default**.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- Change the default catalog/schema
+USE CATALOG IDENTIFIER(DA.catalog_name);
+USE SCHEMA default;
+
+-- View current catalog and schema
+SELECT current_catalog(), current_schema()
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## B. Query a Metric View in the SQL Editor
+-- MAGIC
+-- MAGIC 1. In the left-hand navigation of the Databricks UI, open the **SQL Editor** in a new tab. 
+-- MAGIC
+-- MAGIC 1. In the top bar of the SQL Editor, choose your assigned catalog (starting with `labuser`) and the `default` schema.
+-- MAGIC
+-- MAGIC 1. Enter this query into the query panel to query your metric view.
+-- MAGIC   - **CAUTION**: It is designed to fail, for demonstrative purposes
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT *  
+-- MAGIC FROM order_details 
+-- MAGIC GROUP BY ship_date 
+-- MAGIC ORDER BY ship_date ;
+-- MAGIC ```
+-- MAGIC
+-- MAGIC **ERROR:** Notice that the query fails. `SELECT *` is not defined on metric views.
+-- MAGIC
+-- MAGIC 4. Correct the query by naming the fields that you want to include.
+-- MAGIC   - **CAUTION**: this query is also designed to fail.
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT 
+-- MAGIC   ship_date, 
+-- MAGIC   total_item_count, 
+-- MAGIC   total_distinct_orders 
+-- MAGIC FROM order_details 
+-- MAGIC GROUP BY ship_date 
+-- MAGIC ORDER BY ship_date ;
+-- MAGIC ```
+-- MAGIC
+-- MAGIC **ERROR:** Notice that the query fails. Metric views' measures reside in their own namespace, so the SQL function `MEASURE()` is required to access them.
+-- MAGIC
+-- MAGIC 5. Correct the query by naming the fields to include
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT 
+-- MAGIC   ship_date, 
+-- MAGIC   MEASURE(total_item_count),  
+-- MAGIC   MEASURE(total_distinct_orders) 
+-- MAGIC FROM order_details 
+-- MAGIC GROUP BY ship_date 
+-- MAGIC ORDER BY ship_date ;
+-- MAGIC ```
+-- MAGIC
+-- MAGIC **CORRECT QUERY:** Notice that the fields in this query come from different underlying tables. The metric view encapsulates technical complexity inside the metric view itself.
+-- MAGIC
+-- MAGIC 6. Let's add another field to our query.
+-- MAGIC   - **CAUTION**: This query is also designed to fail 
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT 
+-- MAGIC   ship_date, 
+-- MAGIC   MEASURE(total_item_count),  
+-- MAGIC   MEASURE(total_distinct_orders) , 
+-- MAGIC   order_ID
+-- MAGIC FROM order_details 
+-- MAGIC GROUP BY ship_date 
+-- MAGIC ORDER BY ship_date ;
+-- MAGIC ```
+-- MAGIC
+-- MAGIC **ERROR:** You will receive an error message: `The non-aggregating expression "order_ID" is based on columns which are not participating in the GROUP BY clause.` Think about the semantics of the query. There is a `SUM()` aggregation built in to two of the fields. What would it even mean to include an order ID in a query result that added values across many orders? 
+-- MAGIC
+-- MAGIC 7. But suppose you just wanted to see one randomly selected order from each day. Perhaps you are doing data forensics and want to spot-check some orders. Correct the query like so:
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT 
+-- MAGIC   ship_date, 
+-- MAGIC   MEASURE(total_item_count),  
+-- MAGIC   MEASURE(total_distinct_orders) , 
+-- MAGIC   ANY_VALUE(order_ID)
+-- MAGIC FROM order_details 
+-- MAGIC GROUP BY ship_date 
+-- MAGIC ORDER BY ship_date ;
+-- MAGIC ```
+-- MAGIC
+-- MAGIC Adding the `ANY_VALUE()` function allows the metric view to present a single value from each subrange of rows in its group, chosen effectively at random. The `FIRST_VALUE()` and `LAST_VALUE()` functions are also available here.
+-- MAGIC
+-- MAGIC **CAUTION**: By default, these aggregations won't return null values even if they are present in the underlying data. So this technique is not a good way to spot-check for nulls.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## C. Create a drag-and-drop visualization
+-- MAGIC
+-- MAGIC Now that you have a query result in the SQL Editor, let's create a simple visualization from it.
+-- MAGIC
+-- MAGIC 1. Click the **+** next to the **Table** tab and choose **Visualization** from the context menu.
+-- MAGIC
+-- MAGIC 1. The Visualization Editor appears. Complete the selections offered by the user interface.
+-- MAGIC
+-- MAGIC - In the Visualization Type drop-down, choose **Bar**. 
+-- MAGIC - **X column:** Select **ship_date** and **Years**
+-- MAGIC - **Y columns** Select **measure(total_distinct_orders)** and **Sum**
+-- MAGIC
+-- MAGIC 3. Click the **Save** button at lower right. This visualization will now persist in the SQL Editor. At a later time you can come back and add it to a dashboard to share it with your data consumers.
+-- MAGIC
+-- MAGIC **NOTE:** In a AI/BI dashboard the `display_name` semantic metdata will display in your visualization. You will see that in the Summative Experience lab.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## D. Interact with the metric view using Genie
+-- MAGIC
+-- MAGIC 1. In the Databricks UI, return to your metric view: If necessary, open **Catalog** in a new tab and navigate down to your metric view **labuserXXXX.default.order_details**.
+-- MAGIC
+-- MAGIC 2. In your metric view make sure to select **Close** if necessary.
+-- MAGIC
+-- MAGIC 3. Click on the **Ask Genie** button at top right. (The button's name may include "Preview".)
+-- MAGIC
+-- MAGIC 4. This allows us to create an ad-hoc Genie space, ideal for preliminary exploration. 
+-- MAGIC
+-- MAGIC 5. Notice that the space offers you several suggested queries. 
+-- MAGIC
+-- MAGIC 6. Choose one that has **ship_date** in it. For example `Show total_item_count by ship_date`. 
+-- MAGIC
+-- MAGIC 7. Notice that Genie seamlessly works with metric views and will display information about the **ship_date**. 
+-- MAGIC   - In the results you should see a visualization. Notice the `display_name` semantic metdata for your metric view was used as the visual display names.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Additional Resources
+-- MAGIC
+-- MAGIC - [Query a metric view](https://docs.databricks.com/aws/en/metric-views/create#-query-a-metric-view) 
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC &copy; 2026 Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank">Apache Software Foundation</a>.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank">Support</a>

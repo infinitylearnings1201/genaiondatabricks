@@ -1,0 +1,428 @@
+-- Databricks notebook source
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Lab - Create and Consume a Simple Metric View
+-- MAGIC
+-- MAGIC In this lab activity you will create a metric view and use it in various contexts.
+-- MAGIC
+-- MAGIC ### Estimated Duration: 20 minutes
+-- MAGIC
+-- MAGIC ### Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lab, you should be able to:
+-- MAGIC - Query a metric view in SQL to evaluate the measures associated with it
+-- MAGIC - Create visualizations using the metric view using Drag & Drop 
+-- MAGIC - Use an ad-hoc Genie space to ask questions based on a metric view
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## REQUIRED - SELECT A SHARED SQL WAREHOUSE
+-- MAGIC
+-- MAGIC Before executing cells in this notebook, please select the **SHARED SQL WAREHOUSE** in the lab. Follow these steps:
+-- MAGIC
+-- MAGIC 1. Navigate to the top-right of this notebook and click the drop-down to select compute (it might say **Connect**). Complete one of the following below:
+-- MAGIC
+-- MAGIC    a. Under **Recent resources**, check to see if you have a **shared_warehouse SQL**. If you do, select it.
+-- MAGIC
+-- MAGIC    b. If you do not have a **shared_warehouse** under **Recent resources**, complete the following:
+-- MAGIC
+-- MAGIC     - In the same drop-down, select **More**.
+-- MAGIC
+-- MAGIC     - Then select the **SQL Warehouse** button.
+-- MAGIC
+-- MAGIC     - In the drop-down, make sure **shared_warehouse** is selected.
+-- MAGIC
+-- MAGIC     - Then, at the bottom of the pop-up, select **Start and attach**.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## A. Classroom Setup
+-- MAGIC
+-- MAGIC 1. Run the following cell to configure your working environment for this notebook.
+-- MAGIC
+-- MAGIC **NOTE:** The `DA` object is only used in Databricks Academy courses and is not available outside of these courses. It will dynamically reference the information needed to run the course in your environment.
+
+-- COMMAND ----------
+
+-- MAGIC %run ./Includes/3-Classroom-Setup
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC 2. Run the following cell to view your default catalog and schema. Confirm that your default schema is `labuser` followed by a sequence of digits, such as **labuser11089101_1757916624** and your catalog is **default**.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- Change the default catalog/schema
+USE CATALOG IDENTIFIER(DA.catalog_name);
+USE SCHEMA default;
+
+-- View current catalog and schema
+SELECT current_catalog(), current_schema()
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## B. Create a Metric View Using the Databricks UI
+-- MAGIC
+-- MAGIC 1. In Catalog view, navigate to **samples.tpch.lineitem**, the table to use as the fact table for the metric view. Pull down the chevron in the **Create** button at top right to select Metric View. 
+-- MAGIC
+-- MAGIC 1. Use the dropdowns for catalog and schema at the top left of the panel to place the metric view you are building in the catalog with name beginning with `labuser` and the **default** schema.
+-- MAGIC
+-- MAGIC 1. Click on the proposed name of the metric view, which contains the name of the base table, and change it to **order_details3**.
+-- MAGIC
+-- MAGIC We are going to create a YAML file with these sections:
+-- MAGIC
+-- MAGIC | Section | Meaning |
+-- MAGIC |----|----|
+-- MAGIC | **version** | Databricks's version of the metric-view specification |
+-- MAGIC | **source** | the fact table for this metric view |
+-- MAGIC | **joins** | bindings to lookup tables that enrich the fact table |
+-- MAGIC | **filter** | let's limit the rows returned by queries of this metric view to what the business finds meaningful | 
+-- MAGIC | **dimensions** | the ways that the business needs KPIs to be sliced |
+-- MAGIC | **measures** | the KPIs the business cares about |
+-- MAGIC
+-- MAGIC **NOTE**: The lab exercises in this course were designed to work with version 1.1 of the metric views API. If the sample metric view proposed for you by the user interface starts with a different number, Databricks has introduced a new version of the API since this course was released. However, specifying version 1.1 in your metric views in this course will ensure that the lab exercises continue to work as intended. 
+-- MAGIC
+-- MAGIC 4. If the UI proposed a number of sample dimensions and measures for you, read through them, then delete them for now.
+-- MAGIC
+-- MAGIC 5. Add a **joins** section with joins that bring in enriching data for the fact table. Insert the following below **source**:
+-- MAGIC
+-- MAGIC ```
+-- MAGIC joins:
+-- MAGIC   - name: orders
+-- MAGIC     source: samples.tpch.orders
+-- MAGIC     "on": orders.o_orderkey = source.l_orderkey
+-- MAGIC     joins:
+-- MAGIC       - name: customers
+-- MAGIC         source: samples.tpch.customer
+-- MAGIC         "on": orders.o_custkey = customers.c_custkey
+-- MAGIC         joins:
+-- MAGIC           - name: countries
+-- MAGIC             source: samples.tpch.nation
+-- MAGIC             "on": countries.n_nationkey = customers.c_nationkey
+-- MAGIC             joins:
+-- MAGIC               - name: regions
+-- MAGIC                 source: samples.tpch.region
+-- MAGIC                 "on": regions.r_regionkey = countries.n_regionkey
+-- MAGIC ```
+-- MAGIC
+-- MAGIC Make sure to get the indentation exactly as shown. Use spaces, not tabs.
+-- MAGIC
+-- MAGIC **NOTE**: The nested joins as in this example are required to follow the snowflake schema of the TPC-H dataset. Each customer is associated with a country, and each country is associated with a region.
+-- MAGIC
+-- MAGIC **BEST PRACTICE**: Always look for opportunities to focus the rows returned by a metric view on what your audience of data consumers needs. Don't count on the use of WHERE clauses when the metric view is queried. Instead, proactively limit what is returned to what your business needs using the `filter` clause.
+-- MAGIC
+-- MAGIC 6. Add a filter, so that we can reduce the cost of this metric view by limiting the number of rows it will return. Insert this line, without any indentation, just below the source section, above the **joins** keyword.
+-- MAGIC
+-- MAGIC ```
+-- MAGIC filter: YEAR(orders.o_orderdate) > 1994
+-- MAGIC ```
+-- MAGIC
+-- MAGIC 7. Now add some measures. Remember that a measure is an indicator of business activity, in terms our data consumers understand, independently of how that indicator is sliced or aggregated. Insert these measures just after the `measures:` keyword, so that it comprises a new  **measures** section:
+-- MAGIC
+-- MAGIC ```
+-- MAGIC   - name: total_item_count
+-- MAGIC     expr: COUNT(source.l_orderkey)
+-- MAGIC     display_name: Total Item Count
+-- MAGIC
+-- MAGIC   - name: total_distinct_orders
+-- MAGIC     expr: COUNT(DISTINCT source.l_orderkey)
+-- MAGIC     display_name: Total Distinct Orders
+-- MAGIC
+-- MAGIC   - name: total_revenue_inc_tax
+-- MAGIC     expr: SUM(orders.o_totalprice)
+-- MAGIC ```
+-- MAGIC
+-- MAGIC 8. Now add some dimensions. Remember that a dimension is a way to slice or aggregate the offered measures; the selection of dimensions is driven by the needs of the business. For example, if your data consumers make decisions based on quarterly data, you would choose to offer dimensions based on quarters. Insert these dimensions just after the `dimensions:` keyword, so that it comprises a new  **dimensions** section:
+-- MAGIC
+-- MAGIC ```
+-- MAGIC   - name: order_ID
+-- MAGIC     expr: orders.o_orderkey
+-- MAGIC     display_name: Order ID
+-- MAGIC   - name: ship_date
+-- MAGIC     expr: source.l_shipdate
+-- MAGIC     display_name: Ship Date
+-- MAGIC     format:
+-- MAGIC       type: date
+-- MAGIC       date_format: year_month_day
+-- MAGIC       leading_zeros: false
+-- MAGIC   - name: order_date
+-- MAGIC     expr: orders.o_orderdate
+-- MAGIC     display_name: Order Date
+-- MAGIC   - name: shipping_mode
+-- MAGIC     expr: source.l_shipmode
+-- MAGIC     display_name: Shipping Mode
+-- MAGIC   - name: customer_id
+-- MAGIC     expr: orders.customers.c_custkey
+-- MAGIC     display_name: Customer ID
+-- MAGIC   - name: customer_name
+-- MAGIC     expr: orders.customers.c_name
+-- MAGIC     display_name: Customer Name
+-- MAGIC ```
+-- MAGIC
+-- MAGIC **BEST PRACTICE**: Name your dimensions and measures to make them clear and meaningful for your data consumers, NOT for the data and AI team. Assume that dimension and measure names will be seen by non-technical business data consumers who do not know or care about how your Databricks estate is implemented. 
+-- MAGIC
+-- MAGIC **BEST PRACTICE**: For each measure and dimension, supply a **name** that is easy to work with in code and expression contexts (for example, not including spaces or parentheses), and also a **display_name** that is ideal for use in dashboards or other presentation modes.
+-- MAGIC
+-- MAGIC **NOTE**: There is no requirement for measure and dimension display names to contain spaces, although it's a common practice, in order to make the names consumer-oriented. Their actual names can also contain spaces, although quoting with backticks becomes required in SQL contexts if they do. 
+-- MAGIC
+-- MAGIC 9. Now click **Save** at top right. 
+-- MAGIC
+-- MAGIC 10. When prompted, click **Keep editing** to refine the metric view further.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ##### YAML Checkpoint - ANSWER
+-- MAGIC
+-- MAGIC If you did not complete the previous notebooks, use the starter YAML metric view provided below.
+-- MAGIC
+-- MAGIC Complete the following steps (Optional):
+-- MAGIC
+-- MAGIC - Set your **LABUSER** catalog and **default** schema
+-- MAGIC - Create a metric view named **order_details3**
+-- MAGIC - Paste the starter YAML into the editor
+-- MAGIC - Replace the **LABUSER** placeholder with your own catalog name in all table references
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC   <summary>EXPAND FOR SOLUTION CODE</summary>
+-- MAGIC <button onclick="copyBlock()">Copy to clipboard</button>
+-- MAGIC
+-- MAGIC <pre id="copy-block" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; border:1px solid #e5e7eb; border-radius:10px; background:#f8fafc; padding:14px 16px; font-size:0.85rem; line-height:1.35; white-space:pre;">
+-- MAGIC <code>
+-- MAGIC <!-------------------ADD SOLUTION CODE BELOW------------------->
+-- MAGIC version: 1.1
+-- MAGIC
+-- MAGIC source: samples.tpch.lineitem
+-- MAGIC
+-- MAGIC joins:
+-- MAGIC   - name: orders
+-- MAGIC     source: samples.tpch.orders
+-- MAGIC     "on": orders.o_orderkey = source.l_orderkey
+-- MAGIC     joins:
+-- MAGIC       - name: customers
+-- MAGIC         source: samples.tpch.customer
+-- MAGIC         "on": orders.o_custkey = customers.c_custkey
+-- MAGIC         joins:
+-- MAGIC           - name: countries
+-- MAGIC             source: samples.tpch.nation
+-- MAGIC             "on": countries.n_nationkey = customers.c_nationkey
+-- MAGIC             joins:
+-- MAGIC               - name: regions
+-- MAGIC                 source: samples.tpch.region
+-- MAGIC                 "on": regions.r_regionkey = countries.n_regionkey
+-- MAGIC
+-- MAGIC filter: YEAR(orders.o_orderdate) > 1994
+-- MAGIC
+-- MAGIC dimensions:
+-- MAGIC   - name: order_ID
+-- MAGIC     expr: orders.o_orderkey
+-- MAGIC     display_name: Order ID
+-- MAGIC   - name: ship_date
+-- MAGIC     expr: source.l_shipdate
+-- MAGIC     display_name: Ship Date
+-- MAGIC     format:
+-- MAGIC       type: date
+-- MAGIC       date_format: year_month_day
+-- MAGIC       leading_zeros: false
+-- MAGIC   - name: order_date
+-- MAGIC     expr: orders.o_orderdate
+-- MAGIC     display_name: Order Date
+-- MAGIC   - name: shipping_mode
+-- MAGIC     expr: source.l_shipmode
+-- MAGIC     display_name: Shipping Mode
+-- MAGIC   - name: customer_id
+-- MAGIC     expr: orders.customers.c_custkey
+-- MAGIC     display_name: Customer ID
+-- MAGIC   - name: customer_name
+-- MAGIC     expr: orders.customers.c_name
+-- MAGIC     display_name: Customer Name
+-- MAGIC
+-- MAGIC measures:
+-- MAGIC   - name: total_item_count
+-- MAGIC     expr: COUNT(source.l_orderkey)
+-- MAGIC     display_name: Total Item Count
+-- MAGIC   - name: total_distinct_orders
+-- MAGIC     expr: COUNT(DISTINCT source.l_orderkey)
+-- MAGIC     display_name: Total Distinct Orders
+-- MAGIC   - name: total_revenue_inc_tax
+-- MAGIC     expr: SUM(orders.o_totalprice)
+-- MAGIC <!-------------------END SOLUTION CODE------------------->
+-- MAGIC </code></pre>
+-- MAGIC
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC function copyBlock() {
+-- MAGIC   const el = document.getElementById("copy-block");
+-- MAGIC   if (!el) return;
+-- MAGIC
+-- MAGIC   const text = el.innerText;
+-- MAGIC
+-- MAGIC   // Preferred modern API
+-- MAGIC   if (navigator.clipboard && navigator.clipboard.writeText) {
+-- MAGIC     navigator.clipboard.writeText(text)
+-- MAGIC       .then(() => alert("Copied to clipboard"))
+-- MAGIC       .catch(err => {
+-- MAGIC         console.error("Clipboard write failed:", err);
+-- MAGIC         fallbackCopy(text);
+-- MAGIC       });
+-- MAGIC   } else {
+-- MAGIC     fallbackCopy(text);
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC
+-- MAGIC function fallbackCopy(text) {
+-- MAGIC   const textarea = document.createElement("textarea");
+-- MAGIC   textarea.value = text;
+-- MAGIC   textarea.style.position = "fixed";
+-- MAGIC   textarea.style.left = "-9999px";
+-- MAGIC   document.body.appendChild(textarea);
+-- MAGIC   textarea.select();
+-- MAGIC   try {
+-- MAGIC     document.execCommand("copy");
+-- MAGIC     alert("Copied to clipboard");
+-- MAGIC   } catch (err) {
+-- MAGIC     console.error("Fallback copy failed:", err);
+-- MAGIC     alert("Could not copy to clipboard. Please copy manually.");
+-- MAGIC   } finally {
+-- MAGIC     document.body.removeChild(textarea);
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC </script>
+-- MAGIC </details>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## C. Query a Metric View in the SQL Editor
+-- MAGIC
+-- MAGIC 1. In the left-hand navigation of the Databricks UI, click on SQL Editor. Enter this query into a new-query panel, replacing `labuser` with the name of your catalog:
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT *  
+-- MAGIC FROM labuser.default.order_details3 
+-- MAGIC LIMIT 10; -- replace labuser with your catalog
+-- MAGIC ```
+-- MAGIC
+-- MAGIC Notice that the query fails. SELECT * is not defined on metric views.
+-- MAGIC
+-- MAGIC 2. Correct the query by naming the fields to include:
+-- MAGIC
+-- MAGIC ```sql
+-- MAGIC SELECT 
+-- MAGIC   order_ID,
+-- MAGIC   order_date,
+-- MAGIC   shipping_mode,
+-- MAGIC   ship_date,
+-- MAGIC   MEASURE(total_item_count),
+-- MAGIC   MEASURE(total_distinct_orders)
+-- MAGIC FROM labuser.default.order_details3
+-- MAGIC GROUP BY order_ID, order_date, shipping_mode, ship_date
+-- MAGIC LIMIT 10;  -- replace labuser with your catalog
+-- MAGIC ```
+-- MAGIC
+-- MAGIC Notice that the fields in this query come from different underlying
+-- MAGIC tables. The metric view 
+-- MAGIC encapsulates technical complexity inside the metric
+-- MAGIC view itself.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## D. Create a drag-and-drop visualization
+-- MAGIC
+-- MAGIC Now that you have a query result in the SQL Editor, let's create a simple visualization from it.
+-- MAGIC
+-- MAGIC 1. Click the **+** next to the **Raw results** tab and choose **Visualization** from the context menu.
+-- MAGIC
+-- MAGIC 1. The Visualization Editor appears. Complete the selections offered by the user interface.
+-- MAGIC
+-- MAGIC - In the Visualization Type drop-down, choose **Bar**. 
+-- MAGIC - Notice that, on the **General** tab, the editor has made reasonable guesses about what values you want on your bar chart's X and Y axes based on the contents of the query. This chart could be improved by supplying different scales for the two values being displayed with vertical bars. Click on the **Series** tab and move one of the values being displayed from the left to the right Y-axis. 
+-- MAGIC
+-- MAGIC 3. Experiment with other user-interface choices. 
+-- MAGIC
+-- MAGIC 4. Click the **Save** button at lower right. This visualization will now persist in the SQL Editor. At a later time you can come back and add it to a dashboard to share it with your data consumers.
+-- MAGIC
+-- MAGIC Then, select the data to appear in the visualization. 
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC
+-- MAGIC ### E. Define an alert for a metric view
+-- MAGIC
+-- MAGIC Alerts are a tool for your data consumers to get notified proactively based on business intelligence. What happens if orders drop, returns rise, or the discounts your salespeople grant rise above a certain threshold? 
+-- MAGIC
+-- MAGIC Typically business data consumers care about real-time notifications. Because the current data set is historical rather than current, we'll create an alert for our metric view that would be of interest to data engineers. Recall that all joins defined in metric views are LEFT JOINs, which means they can introduce nulls if foreign keys in the fact table are unmatched. Let's create a query that would be meaningful for weekly runs.
+-- MAGIC
+-- MAGIC 1. Choose **Alerts** from the left navigation of the Databricks UI. In the resulting screen click **Create alert**. The first step is to compose and save a SQL query that queries the metric view for all orders generated in the last week with an unmatched **customer_id**. Enter the following query, replacing `labuser` with the name of your catalog:
+-- MAGIC
+-- MAGIC ```
+-- MAGIC SELECT DISTINCT customer_id 
+-- MAGIC FROM labuser.default.order_details3 -- replace with the name of your catalog
+-- MAGIC WHERE customer_name IS NULL; 
+-- MAGIC ```
+-- MAGIC
+-- MAGIC 2. Click the Run button to confirm that the query works. It should return no rows.
+-- MAGIC
+-- MAGIC 3. We want our alert to fire if this query returns any rows at all. In the condition section, choose **COUNT** as our aggregation and the field it should be looking at as **customer_id**. For the operator choose **>** (greater than) and for the comparison choose **Static Value** and **0**.
+-- MAGIC
+-- MAGIC 1. Click the **Test condition** button. The Databricks UI tests the condition and confirms that it will not fire.
+-- MAGIC
+-- MAGIC 1. Enter yourself as the recipient. Your username in the Vocareum lab environment probably begins with `labuser`. Type in `labuser` and accept the autocompletion. 
+-- MAGIC
+-- MAGIC 1. Click **View alert**. The resulting screen is a summary.
+-- MAGIC
+-- MAGIC 1. Click the **Schedule** button at top right. Accept the default schedule and click **Save**.
+-- MAGIC
+-- MAGIC Now our metric view is being health-checked regularly.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## F. Interact with the metric view using Genie
+-- MAGIC
+-- MAGIC 1. In the Databricks UI, return to the catalog explorer and navigate
+-- MAGIC down to your metric view. Click on the Ask Genie button
+-- MAGIC at top right. This allows us to create an ad-hoc Genie
+-- MAGIC space, ideal for preliminary exploration. 
+-- MAGIC
+-- MAGIC 1. Notice that the space
+-- MAGIC offers you several suggested queries. Choose one and click it. The
+-- MAGIC TPC-H dataset's synthetic nature will become clear. We will use
+-- MAGIC more interesting data for our lab.
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Additional Resources
+-- MAGIC
+-- MAGIC - [Query a metric view](https://docs.databricks.com/aws/en/metric-views/create#-query-a-metric-view) 
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC &copy; 2026 Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank">Apache Software Foundation</a>.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank">Support</a>

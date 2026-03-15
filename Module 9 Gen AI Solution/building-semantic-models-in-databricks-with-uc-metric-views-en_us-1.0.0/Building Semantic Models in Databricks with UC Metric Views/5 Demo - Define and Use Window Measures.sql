@@ -1,0 +1,381 @@
+-- Databricks notebook source
+-- MAGIC %md
+-- MAGIC
+-- MAGIC <div style="text-align: center; line-height: 0; padding-top: 9px;">
+-- MAGIC   <img
+-- MAGIC     src="https://databricks.com/wp-content/uploads/2018/03/db-academy-rgb-1200px.png"
+-- MAGIC     alt="Databricks Learning"
+-- MAGIC   >
+-- MAGIC </div>
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Demo - Define and Use Windowed Measures
+-- MAGIC
+-- MAGIC Among the most essential kinds of business intelligence are those related to change. 
+-- MAGIC In SQL, the way to do time comparisons is using window functions. These are powerful but complex, and they are outside the skill set of many data consumers. They're also easy to do wrong or inconsistently. Metric views address this problem by encapsulating the window functions in the view definition itself. 
+-- MAGIC
+-- MAGIC ### Estimated Duration: 10 minutes
+-- MAGIC
+-- MAGIC ### Learning Objectives
+-- MAGIC
+-- MAGIC By the end of this lesson, you should be able to:
+-- MAGIC - Define a window measure using the metric view definition editor.
+-- MAGIC - Define a window measure using Databricks Assistant.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## REQUIRED - SELECT A SHARED SQL WAREHOUSE
+-- MAGIC
+-- MAGIC Before executing cells in this notebook, please select the **SHARED SQL WAREHOUSE** in the lab. Follow these steps:
+-- MAGIC
+-- MAGIC 1. Navigate to the top-right of this notebook and click the drop-down to select compute (it might say **Connect**). Complete one of the following below:
+-- MAGIC
+-- MAGIC    a. Under **Recent resources**, check to see if you have a **shared_warehouse SQL**. If you do, select it.
+-- MAGIC
+-- MAGIC    b. If you do not have a **shared_warehouse** under **Recent resources**, complete the following:
+-- MAGIC
+-- MAGIC     - In the same drop-down, select **More**.
+-- MAGIC
+-- MAGIC     - Then select the **SQL Warehouse** button.
+-- MAGIC
+-- MAGIC     - In the drop-down, make sure **shared_warehouse** is selected.
+-- MAGIC
+-- MAGIC     - Then, at the bottom of the pop-up, select **Start and attach**.
+
+-- COMMAND ----------
+
+-- MAGIC %md-sandbox
+-- MAGIC ##### YAML Checkpoint - ANSWER
+-- MAGIC
+-- MAGIC If you did not complete the previous notebooks, use the starter YAML metric view provided below.
+-- MAGIC
+-- MAGIC Complete the following steps:
+-- MAGIC
+-- MAGIC - Set your **LABUSER** catalog and **default** schema
+-- MAGIC - Create a metric view named **order_details**
+-- MAGIC - Paste the starter YAML into the editor
+-- MAGIC - Replace the **LABUSER** placeholder with your own catalog name in all table references
+-- MAGIC
+-- MAGIC <details>
+-- MAGIC   <summary>EXPAND FOR SOLUTION CODE</summary>
+-- MAGIC <button onclick="copyBlock()">Copy to clipboard</button>
+-- MAGIC
+-- MAGIC <pre id="copy-block" style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; border:1px solid #e5e7eb; border-radius:10px; background:#f8fafc; padding:14px 16px; font-size:0.85rem; line-height:1.35; white-space:pre;">
+-- MAGIC <code>
+-- MAGIC <!-------------------ADD SOLUTION CODE BELOW------------------->
+-- MAGIC version: 1.1
+-- MAGIC
+-- MAGIC source: samples.tpch.lineitem
+-- MAGIC
+-- MAGIC joins:
+-- MAGIC   - name: orders
+-- MAGIC     source: samples.tpch.orders
+-- MAGIC     "on": orders.o_orderkey = source.l_orderkey
+-- MAGIC     joins:
+-- MAGIC       - name: customers
+-- MAGIC         source: samples.tpch.customer
+-- MAGIC         "on": orders.o_custkey = customers.c_custkey
+-- MAGIC
+-- MAGIC filter: YEAR(orders.o_orderdate) > 1994
+-- MAGIC
+-- MAGIC dimensions:
+-- MAGIC   - name: order_ID
+-- MAGIC     expr: orders.o_orderkey
+-- MAGIC     display_name: Order ID
+-- MAGIC     synonyms:
+-- MAGIC       - order identifier
+-- MAGIC       - receipt number
+-- MAGIC   - name: order_date
+-- MAGIC     expr: orders.o_orderdate
+-- MAGIC     display_name: Order Date
+-- MAGIC     format:
+-- MAGIC       type: date
+-- MAGIC       date_format: year_month_day
+-- MAGIC       leading_zeros: false
+-- MAGIC   - name: shipping_mode
+-- MAGIC     expr: source.l_shipmode
+-- MAGIC     display_name: Shipping Mode
+-- MAGIC   - name: ship_date
+-- MAGIC     expr: source.l_shipdate
+-- MAGIC     display_name: Shipping Date
+-- MAGIC     format:
+-- MAGIC       type: date
+-- MAGIC       date_format: year_month_day
+-- MAGIC       leading_zeros: false
+-- MAGIC   - name: order_year_quarter
+-- MAGIC     expr: "CONCAT(YEAR(orders.o_orderdate), '-Q', QUARTER(orders.o_orderdate))"
+-- MAGIC   - name: Order Status
+-- MAGIC     expr: |-
+-- MAGIC       CASE
+-- MAGIC         WHEN orders.o_orderstatus = "O" THEN "Open"
+-- MAGIC         WHEN orders.o_orderstatus = "P" THEN "Processing"
+-- MAGIC         WHEN orders.o_orderstatus = "F" THEN "Final"
+-- MAGIC         ELSE "Error"
+-- MAGIC       END
+-- MAGIC   - name: order_delay
+-- MAGIC     expr: "DATEDIFF(source.l_shipdate,orders.o_orderdate)"
+-- MAGIC     display_name: Order Delay in Days
+-- MAGIC   - name: order_delay_status
+-- MAGIC     expr: |-
+-- MAGIC       CASE
+-- MAGIC           WHEN order_delay < 0 THEN "Item Shipped Before Order!"
+-- MAGIC           WHEN order_delay BETWEEN 0 AND 2 THEN "0-2 days"
+-- MAGIC           WHEN order_delay BETWEEN 2 AND 4 THEN "2-4 days"
+-- MAGIC           ELSE "5+ days"
+-- MAGIC       END
+-- MAGIC     display_name: Order Delay Status
+-- MAGIC
+-- MAGIC measures:
+-- MAGIC   - name: total_item_count
+-- MAGIC     expr: COUNT(source.l_orderkey)
+-- MAGIC     display_name: Total Item Count
+-- MAGIC   - name: total_distinct_orders
+-- MAGIC     expr: COUNT(DISTINCT source.l_orderkey)
+-- MAGIC     display_name: Total Distinct Orders
+-- MAGIC   - name: revenue_less_discounts
+-- MAGIC     expr: SUM(source.l_extendedprice * (1 - source.l_discount))
+-- MAGIC     display_name: Total Revenue Less Discounts ($)
+-- MAGIC   - name: average_discount_pct
+-- MAGIC     expr: AVG(source.l_discount)
+-- MAGIC     display_name: Average Discount (%)
+-- MAGIC     format:
+-- MAGIC       type: percentage
+-- MAGIC       decimal_places:
+-- MAGIC         type: exact
+-- MAGIC         places: 2
+-- MAGIC   - name: item_return_rate_pct
+-- MAGIC     expr: |-
+-- MAGIC       SUM(CASE WHEN source.l_returnflag = 'R'
+-- MAGIC                THEN 1
+-- MAGIC                ELSE 0
+-- MAGIC           END)
+-- MAGIC       / COUNT(*)
+-- MAGIC     display_name: Item Return Rate (%)
+-- MAGIC     format:
+-- MAGIC       type: percentage
+-- MAGIC       decimal_places:
+-- MAGIC         type: exact
+-- MAGIC         places: 2
+-- MAGIC <!-------------------END SOLUTION CODE------------------->
+-- MAGIC </code></pre>
+-- MAGIC
+-- MAGIC
+-- MAGIC <script>
+-- MAGIC function copyBlock() {
+-- MAGIC   const el = document.getElementById("copy-block");
+-- MAGIC   if (!el) return;
+-- MAGIC
+-- MAGIC   const text = el.innerText;
+-- MAGIC
+-- MAGIC   // Preferred modern API
+-- MAGIC   if (navigator.clipboard && navigator.clipboard.writeText) {
+-- MAGIC     navigator.clipboard.writeText(text)
+-- MAGIC       .then(() => alert("Copied to clipboard"))
+-- MAGIC       .catch(err => {
+-- MAGIC         console.error("Clipboard write failed:", err);
+-- MAGIC         fallbackCopy(text);
+-- MAGIC       });
+-- MAGIC   } else {
+-- MAGIC     fallbackCopy(text);
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC
+-- MAGIC function fallbackCopy(text) {
+-- MAGIC   const textarea = document.createElement("textarea");
+-- MAGIC   textarea.value = text;
+-- MAGIC   textarea.style.position = "fixed";
+-- MAGIC   textarea.style.left = "-9999px";
+-- MAGIC   document.body.appendChild(textarea);
+-- MAGIC   textarea.select();
+-- MAGIC   try {
+-- MAGIC     document.execCommand("copy");
+-- MAGIC     alert("Copied to clipboard");
+-- MAGIC   } catch (err) {
+-- MAGIC     console.error("Fallback copy failed:", err);
+-- MAGIC     alert("Could not copy to clipboard. Please copy manually.");
+-- MAGIC   } finally {
+-- MAGIC     document.body.removeChild(textarea);
+-- MAGIC   }
+-- MAGIC }
+-- MAGIC </script>
+-- MAGIC </details>
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## A. Classroom Setup
+-- MAGIC
+-- MAGIC 1. Run the following cell to configure your working environment for this notebook.
+-- MAGIC
+-- MAGIC **NOTE:** The `DA` object is only used in Databricks Academy courses and is not available outside of these courses. It will dynamically reference the information needed to run the course in your environment.
+
+-- COMMAND ----------
+
+-- MAGIC %run ./Includes/5-Classroom-Setup
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC 2. Run the following cell to view your default catalog and schema. Confirm that your default schema is `labuser` followed by a sequence of digits, such as **labuser11089101_1757916624** and your catalog is **default**.
+-- MAGIC
+
+-- COMMAND ----------
+
+-- Change the default catalog/schema
+USE CATALOG IDENTIFIER(DA.catalog_name);
+USE SCHEMA default;
+
+-- View current catalog and schema
+SELECT current_catalog(), current_schema()
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## B. Edit the definition of the metric view
+-- MAGIC
+-- MAGIC We are going to add some window measures to our metric view called **order_details**. We need to enter the metric view editor in order to enhance it.
+-- MAGIC
+-- MAGIC 1. In the Databricks UI, choose **Catalog** from the left navigation and navigate into the catalog with name starting with `labuser` and the **default** schema.
+-- MAGIC
+-- MAGIC 1. Click on the **order_details** metric view, and then click the **Edit** button.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### B1. Add a dimension that lets us extract the year
+-- MAGIC
+-- MAGIC 1. Add this to the end of the **dimensions** section (taking care to indent properly).
+-- MAGIC
+-- MAGIC ```
+-- MAGIC   - name: order_year
+-- MAGIC     expr: DATE(DATE_TRUNC('year',order_date))
+-- MAGIC ```
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### B2. Add a measure for total revenue
+-- MAGIC
+-- MAGIC 1. Add this to the end of the **measures** section (taking care to indent properly).
+-- MAGIC
+-- MAGIC ```
+-- MAGIC   - name: total_revenue
+-- MAGIC     expr: SUM(source.l_extendedprice)
+-- MAGIC ```
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### B3. Create a window measure for current year revenue
+-- MAGIC
+-- MAGIC Every year-over-year comparison requires two numbers as inputs: the value for the year at hand, and the value for the year we are comparing it to. Let's define a measure that captures revenue for the current year.
+-- MAGIC
+-- MAGIC 1. In the metric-view definition editor, add this at the end of the **measures** section (taking care to indent properly).
+-- MAGIC
+-- MAGIC ```yaml
+-- MAGIC   - name: current_year_sales
+-- MAGIC     expr: MEASURE(total_revenue)
+-- MAGIC     display_name: Current Year Sales
+-- MAGIC     window:
+-- MAGIC       - order: order_year
+-- MAGIC         range: current
+-- MAGIC         semiadditive: last
+-- MAGIC ```
+-- MAGIC
+-- MAGIC We must use the SQL function MEASURE because measures live in a separate namespace from fields and from dimensions. 
+-- MAGIC
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### B4. Create a measure for previous year revenue
+-- MAGIC
+-- MAGIC Now we define a measure for the other value needed to do a year-over-year comparison: the revenue for (in this case) the previous year.
+-- MAGIC
+-- MAGIC 1. In the metric-view definition editor, add this at the end of the **measures** section (taking care to indent properly).
+-- MAGIC
+-- MAGIC ```
+-- MAGIC   - name: last_year_sales
+-- MAGIC     expr: MEASURE(total_revenue)
+-- MAGIC     display_name: Last Year Sales
+-- MAGIC     window:
+-- MAGIC       - order: order_year
+-- MAGIC         range: trailing 1 year
+-- MAGIC         semiadditive: last
+-- MAGIC ```
+-- MAGIC
+-- MAGIC The only difference between this measure definition and the one in the last part of the demo is the value of **range**: `trailing 1 year` instead of `current`.
+-- MAGIC
+-- MAGIC Notice that this window measure and the one before it are also composed measures, in that they are based on another measure in turn.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ### B5. Create a composed measure for YoY growth
+-- MAGIC
+-- MAGIC Now we can compose the last two measures into a new one.
+-- MAGIC
+-- MAGIC 1. In the metric-view definition editor, add this at the end of the **measures** section (taking care to indent properly).
+-- MAGIC
+-- MAGIC ```
+-- MAGIC - name: yoy_growth_pct
+-- MAGIC     expr: |
+-- MAGIC           ( MEASURE(current_year_sales) - MEASURE(last_year_sales) )
+-- MAGIC           /
+-- MAGIC           MEASURE(last_year_sales)
+-- MAGIC     display_name: YoY Growth (%)
+-- MAGIC     format:
+-- MAGIC       type: percentage
+-- MAGIC       decimal_places:
+-- MAGIC         type: exact
+-- MAGIC         places: 2
+-- MAGIC ```
+-- MAGIC
+-- MAGIC The step-by-step logic helps us avoid error.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## C. Query the result
+-- MAGIC
+-- MAGIC 1. Click the **Save** button in the metric view definition editor.
+-- MAGIC
+-- MAGIC 1. In the Databricks UI, choose **SQL Editor** from the left navigation and enter this query into a new query panel:
+-- MAGIC
+-- MAGIC 1. Select the labuser catalog and the default schema to execute the query in the SQL editor.
+-- MAGIC
+-- MAGIC ```
+-- MAGIC SELECT
+-- MAGIC   order_year,
+-- MAGIC   MEASURE(current_year_sales) AS `Current Year Sales`,
+-- MAGIC   MEASURE(last_year_sales) AS `Last Year Sales`,
+-- MAGIC   MEASURE(yoy_growth_pct) AS `YoY Growth (%)`
+-- MAGIC FROM order_details
+-- MAGIC GROUP BY order_year 
+-- MAGIC ORDER BY order_year ;
+-- MAGIC ```
+-- MAGIC
+-- MAGIC Confirm that these results are as expected.
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Additional Resources
+-- MAGIC
+-- MAGIC - [Create and use window measures in metric views](https://docs.databricks.com/aws/en/metric-views/data-modeling/window-measures) 
+-- MAGIC
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC &copy; 2026 Databricks, Inc. All rights reserved. Apache, Apache Spark, Spark, the Spark Logo, Apache Iceberg, Iceberg, and the Apache Iceberg logo are trademarks of the <a href="https://www.apache.org/" target="_blank">Apache Software Foundation</a>.<br/><br/><a href="https://databricks.com/privacy-policy" target="_blank">Privacy Policy</a> | <a href="https://databricks.com/terms-of-use" target="_blank">Terms of Use</a> | <a href="https://help.databricks.com/" target="_blank">Support</a>
